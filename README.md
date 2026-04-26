@@ -34,6 +34,7 @@ chatgpt-import-share \
 ```
 
 Then open `conversation-for-ai-studio.md` and paste it into the target chat.
+On success, the command prints the output file path and size so you can see what was created.
 
 Customize the instruction at the top of the pasted prompt:
 

@@ -67,7 +67,8 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             self.assertEqual(stdout.getvalue(), "")
-            self.assertIn(f"Wrote {output_path}", stderr.getvalue())
+            self.assertIn(f"Output file written: {output_path}", stderr.getvalue())
+            self.assertIn("bytes", stderr.getvalue())
             output = output_path.read_text(encoding="utf-8")
 
         self.assertTrue(output.startswith("# Example Share"))
@@ -96,11 +97,26 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertGreater(len(paths), 1)
-        self.assertIn("Wrote", stderr.getvalue())
+        self.assertIn("Output files written", stderr.getvalue())
+        self.assertIn("bytes", stderr.getvalue())
         self.assertIn("Paste the generated files", stderr.getvalue())
         self.assertIn("wait for the remaining chunks", contents[0])
         self.assertIn("This is the final chunk", contents[-1])
         self.assertIn("List open tasks.", contents[-1])
+
+    def test_split_dir_reports_single_chunk_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("chatgpt_import_share.cli.parse_share_source", return_value=_conversation()):
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
+                    result = main(["share.html", "--split-dir", tmpdir])
+
+            paths = sorted(Path(tmpdir).glob("chatgpt-share-part-*.md"))
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(paths), 1)
+        self.assertIn(f"Output file written: {paths[0]}", stderr.getvalue())
+        self.assertIn("Paste the generated files", stderr.getvalue())
 
 
 if __name__ == "__main__":

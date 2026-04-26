@@ -267,7 +267,7 @@ def _write_output(text: str, output_path: str | None) -> None:
         return
     path = Path(output_path)
     path.write_text(text, encoding="utf-8")
-    print(f"Wrote {path}", file=sys.stderr)
+    print(f"Output file written: {path} ({path.stat().st_size} bytes)", file=sys.stderr)
 
 
 def _print_chunk_summary(paths: list[Path]) -> None:
@@ -276,8 +276,11 @@ def _print_chunk_summary(paths: list[Path]) -> None:
         return
 
     directory = paths[0].parent
-    noun = "chunk" if len(paths) == 1 else "chunks"
-    print(f"Wrote {len(paths)} paste-ready {noun} to {directory}:", file=sys.stderr)
-    for path in paths:
-        print(f"  {path}", file=sys.stderr)
+    if len(paths) == 1:
+        path = paths[0]
+        print(f"Output file written: {path} ({path.stat().st_size} bytes)", file=sys.stderr)
+    else:
+        print(f"Output files written to {directory}:", file=sys.stderr)
+        for path in paths:
+            print(f"  {path} ({path.stat().st_size} bytes)", file=sys.stderr)
     print("Paste the generated files into the target chat in filename order.", file=sys.stderr)
