@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -61,11 +61,13 @@ class CliTests(unittest.TestCase):
             output_path = Path(tmpdir) / "conversation.md"
             with patch("chatgpt_import_share.cli.parse_share_source", return_value=_conversation()):
                 stdout = io.StringIO()
-                with redirect_stdout(stdout):
+                stderr = io.StringIO()
+                with redirect_stdout(stdout), redirect_stderr(stderr):
                     result = main(["share.html", "--output", str(output_path)])
 
             self.assertEqual(result, 0)
             self.assertEqual(stdout.getvalue(), "")
+            self.assertIn(f"Wrote {output_path}", stderr.getvalue())
             output = output_path.read_text(encoding="utf-8")
 
         self.assertTrue(output.startswith("# Example Share"))
@@ -75,23 +77,27 @@ class CliTests(unittest.TestCase):
         long_text = " ".join(f"word{i}" for i in range(80))
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch("chatgpt_import_share.cli.parse_share_source", return_value=_conversation(long_text)):
-                result = main(
-                    [
-                        "share.html",
-                        "--split-dir",
-                        tmpdir,
-                        "--max-chars",
-                        "120",
-                        "--task",
-                        "List open tasks.",
-                    ]
-                )
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
+                    result = main(
+                        [
+                            "share.html",
+                            "--split-dir",
+                            tmpdir,
+                            "--max-chars",
+                            "120",
+                            "--task",
+                            "List open tasks.",
+                        ]
+                    )
 
             paths = sorted(Path(tmpdir).glob("chatgpt-share-part-*.md"))
             contents = [path.read_text(encoding="utf-8") for path in paths]
 
         self.assertEqual(result, 0)
         self.assertGreater(len(paths), 1)
+        self.assertIn("Wrote", stderr.getvalue())
+        self.assertIn("Paste the generated files", stderr.getvalue())
         self.assertIn("wait for the remaining chunks", contents[0])
         self.assertIn("This is the final chunk", contents[-1])
         self.assertIn("List open tasks.", contents[-1])

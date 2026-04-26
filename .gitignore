@@ -9,3 +9,5 @@ build/
 dist/
 htmlcov/
 .coverage
+ai-studio-chunks/
+conversation-for-ai-studio.md

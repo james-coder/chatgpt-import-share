@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from .images import download_generated_images, resolve_generated_image_urls
@@ -121,12 +122,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.split_dir:
         chunks = _split_transcript(transcript, max_chars=args.max_chars)
-        _write_chunk_files(
+        paths = _write_chunk_files(
             args.split_dir,
             chunks,
             conversation=conversation,
             task=args.task,
         )
+        _print_chunk_summary(paths)
         return 0
 
     if args.ai_studio:
@@ -238,10 +240,11 @@ def _write_chunk_files(
     *,
     conversation: Conversation,
     task: str,
-) -> None:
+) -> list[Path]:
     output_dir = Path(directory)
     output_dir.mkdir(parents=True, exist_ok=True)
     width = max(3, len(str(len(chunks))))
+    paths: list[Path] = []
     for index, chunk in enumerate(chunks, start=1):
         path = output_dir / f"chatgpt-share-part-{index:0{width}d}-of-{len(chunks):0{width}d}.md"
         path.write_text(
@@ -254,10 +257,27 @@ def _write_chunk_files(
             ),
             encoding="utf-8",
         )
+        paths.append(path)
+    return paths
 
 
 def _write_output(text: str, output_path: str | None) -> None:
     if output_path is None:
         print(text, end="" if text.endswith("\n") else "\n")
         return
-    Path(output_path).write_text(text, encoding="utf-8")
+    path = Path(output_path)
+    path.write_text(text, encoding="utf-8")
+    print(f"Wrote {path}", file=sys.stderr)
+
+
+def _print_chunk_summary(paths: list[Path]) -> None:
+    if not paths:
+        print("No chunk files were written.", file=sys.stderr)
+        return
+
+    directory = paths[0].parent
+    noun = "chunk" if len(paths) == 1 else "chunks"
+    print(f"Wrote {len(paths)} paste-ready {noun} to {directory}:", file=sys.stderr)
+    for path in paths:
+        print(f"  {path}", file=sys.stderr)
+    print("Paste the generated files into the target chat in filename order.", file=sys.stderr)
