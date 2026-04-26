@@ -20,7 +20,58 @@ From git:
 python3 -m pip install git+https://github.com/james-coder/chatgpt-import-share.git
 ```
 
-For a Python-only agent:
+## Manual AI Studio Bridge
+
+Hosted AI code-execution sandboxes may be unable to reach `chatgpt.com` or install packages. The reliable workflow is to fetch the share conversation locally, then paste the exported text into Google AI Studio or another LLM chat.
+
+Create a paste-ready prompt:
+
+```bash
+chatgpt-import-share \
+  https://chatgpt.com/share/SHARE_ID \
+  --ai-studio \
+  --output conversation-for-ai-studio.md
+```
+
+Then open `conversation-for-ai-studio.md` and paste it into the target chat.
+
+Customize the instruction at the top of the pasted prompt:
+
+```bash
+chatgpt-import-share \
+  https://chatgpt.com/share/SHARE_ID \
+  --ai-studio \
+  --task "Summarize the architecture decisions and list the remaining implementation tasks." \
+  --output conversation-for-ai-studio.md
+```
+
+For long conversations, write multiple paste chunks:
+
+```bash
+chatgpt-import-share \
+  https://chatgpt.com/share/SHARE_ID \
+  --split-dir ai-studio-chunks \
+  --max-chars 50000
+```
+
+Paste the generated files in filename order. Earlier chunks tell the model to wait; the final chunk tells it to perform the task.
+
+For clipboard workflows:
+
+```bash
+# macOS
+chatgpt-import-share https://chatgpt.com/share/SHARE_ID --ai-studio | pbcopy
+
+# Linux with xclip
+chatgpt-import-share https://chatgpt.com/share/SHARE_ID --ai-studio | xclip -selection clipboard
+
+# Linux with Wayland
+chatgpt-import-share https://chatgpt.com/share/SHARE_ID --ai-studio | wl-copy
+```
+
+## Python Usage
+
+From Python code that can reach the network and install packages:
 
 ```python
 import subprocess
@@ -34,8 +85,6 @@ subprocess.check_call([
     "git+https://github.com/james-coder/chatgpt-import-share.git",
 ])
 ```
-
-## Python Usage
 
 ```python
 from chatgpt_import_share import parse_share_source
@@ -84,7 +133,7 @@ from chatgpt_import_share import parse_share_source
 
 ## Restricted Code Execution Environments
 
-Some hosted Python code execution tools do not allow installing custom packages. The text importer has no third-party dependencies, so those tools can fetch the source files directly instead:
+Some hosted Python code execution tools do not allow installing custom packages. The text importer has no third-party dependencies, so those tools can fetch the source files directly instead if their sandbox has outbound network access:
 
 ```python
 from pathlib import Path
@@ -108,6 +157,8 @@ print(conversation.transcript(roles=["user", "assistant"]))
 
 ```bash
 chatgpt-import-share https://chatgpt.com/share/SHARE_ID
+chatgpt-import-share https://chatgpt.com/share/SHARE_ID --ai-studio --output conversation.md
+chatgpt-import-share https://chatgpt.com/share/SHARE_ID --split-dir chunks --max-chars 50000
 chatgpt-import-share share.html --json
 chatgpt-import-share share.html --role user --role assistant
 ```

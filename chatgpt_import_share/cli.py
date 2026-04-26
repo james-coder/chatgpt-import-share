@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 from .images import download_generated_images, resolve_generated_image_urls
+from .models import Conversation
 from .parser import parse_share_source
+
+DEFAULT_TASK = "Please read this ChatGPT conversation and summarize the key points, decisions, and open tasks."
+DEFAULT_CHUNK_CHARS = 60000
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -17,6 +22,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Print machine-readable JSON instead of a transcript.",
+    )
+    parser.add_argument(
+        "--ai-studio",
+        action="store_true",
+        help="Print a paste-ready prompt plus transcript for Google AI Studio or another LLM.",
+    )
+    parser.add_argument(
+        "--task",
+        default=DEFAULT_TASK,
+        help="Task text to include with --ai-studio output.",
+    )
+    parser.add_argument(
+        "--output",
+        metavar="FILE",
+        help="Write output to a file instead of stdout.",
+    )
+    parser.add_argument(
+        "--split-dir",
+        metavar="DIR",
+        help="Write paste-ready chunks into a directory. Implies --ai-studio.",
+    )
+    parser.add_argument(
+        "--max-chars",
+        type=int,
+        default=DEFAULT_CHUNK_CHARS,
+        help=f"Maximum transcript characters per chunk with --split-dir. Default: {DEFAULT_CHUNK_CHARS}.",
     )
     parser.add_argument(
         "--include-empty",
@@ -43,7 +74,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.json and (args.ai_studio or args.split_dir):
+        parser.error("--json cannot be combined with --ai-studio or --split-dir.")
+    if args.output and args.split_dir:
+        parser.error("--output cannot be combined with --split-dir.")
+    if args.max_chars <= 0:
+        parser.error("--max-chars must be greater than 0.")
+    if (args.images_json or args.download_images) and (args.ai_studio or args.split_dir):
+        parser.error("Image options cannot be combined with --ai-studio or --split-dir.")
 
     conversation = parse_share_source(args.source)
 
@@ -53,7 +94,10 @@ def main(argv: list[str] | None = None) -> int:
 
         images = resolve_generated_image_urls(args.source, conversation=conversation)
         if args.images_json:
-            print(json.dumps([image.to_dict() for image in images], indent=2, ensure_ascii=True))
+            _write_output(
+                json.dumps([image.to_dict() for image in images], indent=2, ensure_ascii=True),
+                args.output,
+            )
             return 0
 
         saved_paths = download_generated_images(
@@ -61,22 +105,159 @@ def main(argv: list[str] | None = None) -> int:
             args.download_images,
             conversation=conversation,
         )
-        print(json.dumps([str(path) for path in saved_paths], indent=2, ensure_ascii=True))
+        _write_output(
+            json.dumps([str(path) for path in saved_paths], indent=2, ensure_ascii=True),
+            args.output,
+        )
         return 0
 
     if args.json:
-        print(json.dumps(conversation.to_dict(), indent=2, ensure_ascii=True))
+        _write_output(json.dumps(conversation.to_dict(), indent=2, ensure_ascii=True), args.output)
         return 0
 
-    if conversation.title:
-        print(f"# {conversation.title}\n")
     transcript = conversation.transcript(
         roles=args.roles,
         include_empty=args.include_empty,
     )
-    print(transcript)
+    if args.split_dir:
+        chunks = _split_transcript(transcript, max_chars=args.max_chars)
+        _write_chunk_files(
+            args.split_dir,
+            chunks,
+            conversation=conversation,
+            task=args.task,
+        )
+        return 0
+
+    if args.ai_studio:
+        output = _format_ai_studio_prompt(conversation, transcript, task=args.task)
+    else:
+        output = _format_transcript(conversation, transcript)
+
+    _write_output(output, args.output)
     return 0
 
 
 def _looks_like_url(source: str) -> bool:
     return source.startswith("http://") or source.startswith("https://")
+
+
+def _format_transcript(conversation: Conversation, transcript: str) -> str:
+    if conversation.title:
+        return f"# {conversation.title}\n\n{transcript}\n"
+    return f"{transcript}\n"
+
+
+def _format_ai_studio_prompt(conversation: Conversation, transcript: str, *, task: str) -> str:
+    title = conversation.title or "Untitled ChatGPT share"
+    return (
+        f"{task}\n\n"
+        "The transcript is exported from a ChatGPT share page. "
+        "Speaker roles are shown in square brackets.\n\n"
+        f"Title: {title}\n\n"
+        "BEGIN CHATGPT SHARE TRANSCRIPT\n"
+        f"{transcript}\n"
+        "END CHATGPT SHARE TRANSCRIPT\n"
+    )
+
+
+def _format_ai_studio_chunk(
+    chunk: str,
+    *,
+    conversation: Conversation,
+    task: str,
+    index: int,
+    total: int,
+) -> str:
+    title = conversation.title or "Untitled ChatGPT share"
+    if total == 1:
+        return _format_ai_studio_prompt(conversation, chunk, task=task)
+
+    if index < total:
+        instruction = (
+            "This is one chunk of a longer ChatGPT conversation. "
+            "Read it and wait for the remaining chunks before summarizing."
+        )
+    else:
+        instruction = f"This is the final chunk. After reading it, do this task: {task}"
+
+    return (
+        f"{instruction}\n\n"
+        f"Title: {title}\n"
+        f"Chunk: {index} of {total}\n\n"
+        f"BEGIN CHATGPT SHARE TRANSCRIPT CHUNK {index} OF {total}\n"
+        f"{chunk}\n"
+        f"END CHATGPT SHARE TRANSCRIPT CHUNK {index} OF {total}\n"
+    )
+
+
+def _split_transcript(transcript: str, *, max_chars: int) -> list[str]:
+    blocks = transcript.split("\n\n")
+    chunks: list[str] = []
+    current: list[str] = []
+    current_length = 0
+
+    for block in blocks:
+        block_length = len(block)
+        separator_length = 2 if current else 0
+        if current and current_length + separator_length + block_length > max_chars:
+            chunks.append("\n\n".join(current))
+            current = []
+            current_length = 0
+
+        if block_length <= max_chars:
+            current.append(block)
+            current_length += (2 if current_length else 0) + block_length
+            continue
+
+        wrapped = _split_long_block(block, max_chars=max_chars)
+        for part in wrapped:
+            if current:
+                chunks.append("\n\n".join(current))
+                current = []
+                current_length = 0
+            chunks.append(part)
+
+    if current:
+        chunks.append("\n\n".join(current))
+    return chunks or [""]
+
+
+def _split_long_block(block: str, *, max_chars: int) -> list[str]:
+    parts: list[str] = []
+    start = 0
+    while start < len(block):
+        parts.append(block[start : start + max_chars])
+        start += max_chars
+    return parts
+
+
+def _write_chunk_files(
+    directory: str,
+    chunks: list[str],
+    *,
+    conversation: Conversation,
+    task: str,
+) -> None:
+    output_dir = Path(directory)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    width = max(3, len(str(len(chunks))))
+    for index, chunk in enumerate(chunks, start=1):
+        path = output_dir / f"chatgpt-share-part-{index:0{width}d}-of-{len(chunks):0{width}d}.md"
+        path.write_text(
+            _format_ai_studio_chunk(
+                chunk,
+                conversation=conversation,
+                task=task,
+                index=index,
+                total=len(chunks),
+            ),
+            encoding="utf-8",
+        )
+
+
+def _write_output(text: str, output_path: str | None) -> None:
+    if output_path is None:
+        print(text, end="" if text.endswith("\n") else "\n")
+        return
+    Path(output_path).write_text(text, encoding="utf-8")
