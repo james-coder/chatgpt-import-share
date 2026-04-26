@@ -17,7 +17,7 @@ python3 -m pip install -e .[dev]
 From git:
 
 ```bash
-python3 -m pip install git+https://github.com/YOUR_ACCOUNT/chatgpt-import-share.git
+python3 -m pip install git+https://github.com/james-coder/chatgpt-import-share.git
 ```
 
 For a Python-only agent:
@@ -31,7 +31,7 @@ subprocess.check_call([
     "-m",
     "pip",
     "install",
-    "git+https://github.com/YOUR_ACCOUNT/chatgpt-import-share.git",
+    "git+https://github.com/james-coder/chatgpt-import-share.git",
 ])
 ```
 
@@ -80,6 +80,28 @@ import sys
 sys.path.insert(0, "/path/to/chatgpt-import-share")
 
 from chatgpt_import_share import parse_share_source
+```
+
+## Restricted Code Execution Environments
+
+Some hosted Python code execution tools do not allow installing custom packages. The text importer has no third-party dependencies, so those tools can fetch the source files directly instead:
+
+```python
+from pathlib import Path
+from urllib.request import urlopen
+
+base_url = "https://raw.githubusercontent.com/james-coder/chatgpt-import-share/main/chatgpt_import_share"
+package_dir = Path("chatgpt_import_share")
+package_dir.mkdir(exist_ok=True)
+
+for filename in ["__init__.py", "models.py", "parser.py", "images.py"]:
+    data = urlopen(f"{base_url}/{filename}", timeout=30).read()
+    (package_dir / filename).write_bytes(data)
+
+from chatgpt_import_share import parse_share_source
+
+conversation = parse_share_source("https://chatgpt.com/share/SHARE_ID")
+print(conversation.transcript(roles=["user", "assistant"]))
 ```
 
 ## CLI
